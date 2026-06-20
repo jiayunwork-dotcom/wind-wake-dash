@@ -582,3 +582,236 @@ def plot_power_curve(turbine_params: Dict, name: str) -> go.Figure:
     fig.update_yaxes(title_text="功率 (MW)", secondary_y=False)
     fig.update_yaxes(title_text="推力系数 Ct", secondary_y=True)
     return fig
+
+
+def plot_cash_flow_lines(
+    years: np.ndarray,
+    revenue: np.ndarray,
+    cost: np.ndarray,
+    net_flow: np.ndarray,
+    title: str = "逐年现金流分析",
+) -> go.Figure:
+    """
+    逐年现金流折线图: 收入线、支出线、净现金流线
+    """
+    fig = go.Figure()
+
+    fig.add_trace(go.Scatter(
+        x=years,
+        y=revenue,
+        mode="lines+markers",
+        name="收入",
+        line=dict(color="#22c55e", width=3),
+        marker=dict(size=8),
+        hovertemplate="第%{x}年<br>收入: %{y:.2f} 万元<extra></extra>",
+    ))
+
+    fig.add_trace(go.Scatter(
+        x=years,
+        y=cost,
+        mode="lines+markers",
+        name="支出",
+        line=dict(color="#ef4444", width=3),
+        marker=dict(size=8),
+        hovertemplate="第%{x}年<br>支出: %{y:.2f} 万元<extra></extra>",
+    ))
+
+    fig.add_trace(go.Scatter(
+        x=years,
+        y=net_flow,
+        mode="lines+markers",
+        name="净现金流",
+        line=dict(color="#3b82f6", width=3, dash="solid"),
+        marker=dict(size=8),
+        hovertemplate="第%{x}年<br>净现金流: %{y:.2f} 万元<extra></extra>",
+    ))
+
+    fig.add_hline(
+        y=0,
+        line_dash="dash",
+        line_color="gray",
+        opacity=0.7,
+    )
+
+    fig.update_layout(
+        title=title,
+        xaxis_title="年份",
+        yaxis_title="金额 (万元)",
+        height=450,
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5),
+        hovermode="x unified",
+        plot_bgcolor="rgba(245,245,245,0.3)",
+    )
+
+    return fig
+
+
+def plot_cumulative_cash_flow(
+    years: np.ndarray,
+    cumulative_flow: np.ndarray,
+    payback_period: Optional[float] = None,
+    title: str = "累计净现金流曲线",
+) -> go.Figure:
+    """
+    累计净现金流面积图, 标注回收期拐点
+    """
+    fig = go.Figure()
+
+    fig.add_trace(go.Scatter(
+        x=years,
+        y=cumulative_flow,
+        mode="lines",
+        fill="tozeroy",
+        name="累计净现金流",
+        line=dict(color="#8b5cf6", width=3),
+        fillcolor="rgba(139, 92, 246, 0.2)",
+        hovertemplate="第%{x}年<br>累计: %{y:.2f} 万元<extra></extra>",
+    ))
+
+    fig.add_hline(
+        y=0,
+        line_dash="dash",
+        line_color="red",
+        opacity=0.8,
+        annotation_text="盈亏平衡点",
+        annotation_position="bottom right",
+        annotation_font=dict(color="red"),
+    )
+
+    if payback_period is not None and payback_period <= years[-1]:
+        pb_year = int(np.floor(payback_period))
+        if pb_year >= 1 and pb_year <= len(years):
+            fig.add_annotation(
+                x=payback_period,
+                y=0,
+                text=f"★ 投资回收期: {payback_period:.1f} 年",
+                showarrow=True,
+                arrowhead=2,
+                arrowsize=1.5,
+                arrowwidth=2,
+                arrowcolor="red",
+                font=dict(color="red", size=12),
+                ax=0,
+                ay=-60,
+                bgcolor="rgba(255,255,255,0.9)",
+                bordercolor="red",
+                borderwidth=1,
+            )
+
+            fig.add_trace(go.Scatter(
+                x=[payback_period],
+                y=[0],
+                mode="markers",
+                marker=dict(size=14, color="red", symbol="circle"),
+                name="投资回收点",
+                hovertemplate=f"回收期: {payback_period:.1f} 年<extra></extra>",
+            ))
+
+    fig.update_layout(
+        title=title,
+        xaxis_title="年份",
+        yaxis_title="累计金额 (万元)",
+        height=450,
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5),
+        hovermode="x unified",
+        plot_bgcolor="rgba(245,245,245,0.3)",
+    )
+
+    return fig
+
+
+def plot_sensitivity_curve(
+    param_values: np.ndarray,
+    npv_values: np.ndarray,
+    param_name: str,
+    critical_value: Optional[float] = None,
+    base_value: Optional[float] = None,
+    title: str = "单变量敏感性分析",
+) -> go.Figure:
+    """
+    单变量敏感性分析曲线: NPV随参数变化
+    """
+    param_label_map = {
+        'electricity_price': '电价 (元/kWh)',
+        'total_investment': '总投资成本 (万元)',
+        'discount_rate': '折现率 (%)',
+    }
+    x_label = param_label_map.get(param_name, '参数值')
+
+    fig = go.Figure()
+
+    colors = np.where(npv_values >= 0, "#22c55e", "#ef4444")
+
+    fig.add_trace(go.Scatter(
+        x=param_values,
+        y=npv_values,
+        mode="lines+markers",
+        name="NPV",
+        line=dict(color="#3b82f6", width=3),
+        marker=dict(size=10, color=colors, line=dict(width=2, color="#1e40af")),
+        hovertemplate=f"{x_label.split(' ')[0]}: %{{x:.4f}}<br>NPV: %{{y:.2f}} 万元<extra></extra>",
+    ))
+
+    fig.add_hline(
+        y=0,
+        line_dash="dash",
+        line_color="red",
+        opacity=0.8,
+        annotation_text="NPV = 0",
+        annotation_position="top right",
+        annotation_font=dict(color="red"),
+    )
+
+    if base_value is not None:
+        base_npv_idx = np.argmin(np.abs(param_values - base_value))
+        base_npv = npv_values[base_npv_idx]
+        fig.add_trace(go.Scatter(
+            x=[base_value],
+            y=[base_npv],
+            mode="markers",
+            marker=dict(size=14, color="#f59e0b", symbol="star"),
+            name="基准值",
+            hovertemplate=f"基准值: {base_value:.4f}<br>NPV: {base_npv:.2f} 万元<extra></extra>",
+        ))
+
+    if critical_value is not None:
+        x_min, x_max = param_values.min(), param_values.max()
+        if x_min <= critical_value <= x_max:
+            fig.add_trace(go.Scatter(
+                x=[critical_value],
+                y=[0],
+                mode="markers",
+                marker=dict(size=14, color="red", symbol="circle"),
+                name="临界值",
+                hovertemplate=f"临界值: {critical_value:.4f}<br>NPV = 0<extra></extra>",
+            ))
+
+            unit = x_label.split('(')[-1].rstrip(')')
+            fig.add_annotation(
+                x=critical_value,
+                y=0,
+                text=f"🔴 临界值: {critical_value:.4f} {unit}",
+                showarrow=True,
+                arrowhead=2,
+                arrowsize=1.5,
+                arrowwidth=2,
+                arrowcolor="red",
+                font=dict(color="red", size=12),
+                ax=0,
+                ay=-50,
+                bgcolor="rgba(255,255,255,0.9)",
+                bordercolor="red",
+                borderwidth=1,
+            )
+
+    fig.update_layout(
+        title=title,
+        xaxis_title=x_label,
+        yaxis_title="净现值 NPV (万元)",
+        height=450,
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5),
+        hovermode="x unified",
+        plot_bgcolor="rgba(245,245,245,0.3)",
+    )
+
+    return fig

@@ -55,6 +55,23 @@ from .visualization import (
     plot_power_curve,
     plot_sensitivity_heatmap,
     plot_model_comparison_wind_speed,
+    plot_cash_flow_lines,
+    plot_cumulative_cash_flow,
+    plot_sensitivity_curve,
+)
+
+from .economic_analysis import (
+    EconomicParams,
+    EconomicResults,
+    calculate_loan_payment,
+    calculate_electricity_price,
+    calculate_annual_generation,
+    calculate_lcoe,
+    calculate_npv,
+    calculate_irr,
+    calculate_payback_period,
+    run_economic_analysis,
+    run_sensitivity_analysis,
 )
 
 __all__ = [
@@ -94,4 +111,18 @@ __all__ = [
     "plot_power_curve",
     "plot_sensitivity_heatmap",
     "plot_model_comparison_wind_speed",
+    "plot_cash_flow_lines",
+    "plot_cumulative_cash_flow",
+    "plot_sensitivity_curve",
+    "EconomicParams",
+    "EconomicResults",
+    "calculate_loan_payment",
+    "calculate_electricity_price",
+    "calculate_annual_generation",
+    "calculate_lcoe",
+    "calculate_npv",
+    "calculate_irr",
+    "calculate_payback_period",
+    "run_economic_analysis",
+    "run_sensitivity_analysis",
 ]
