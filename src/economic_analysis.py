@@ -113,35 +113,23 @@ def calculate_lcoe(
     discount_rate: float,
     project_lifetime: int,
     salvage_rate: float,
-    loan_ratio: float,
-    loan_interest_rate: float,
-    loan_tenor: int,
 ) -> float:
     """
     计算度电成本 LCOE (Levelized Cost of Energy)
     LCOE = 生命周期成本现值 / 生命周期发电量现值
-    生命周期成本包括: 初始投资 + 运维成本 + 贷款利息 - 残值
+    采用无杠杆(项目整体)视角, 不考虑融资结构(贷款比例不影响LCOE)
+    生命周期成本包括: 初始投资 + 运维成本 - 残值
     单位说明: 成本输入为万元, 发电量为kWh, LCOE输出为元/kWh
     """
     r = discount_rate / 100.0
     years = np.arange(1, project_lifetime + 1)
     discount_factors = 1.0 / (1 + r) ** years
 
-    loan_amount = total_investment * loan_ratio / 100.0
-    equity_investment = total_investment - loan_amount
-
-    annual_payment = calculate_loan_payment(
-        loan_amount, loan_interest_rate, loan_tenor
-    )
-    loan_payments = np.zeros(project_lifetime)
-    loan_payments[:loan_tenor] = annual_payment
-
     fixed_om_costs = np.full(project_lifetime, annual_fixed_om)
     variable_om_costs = variable_om_unit * annual_generation / 10000.0
     total_om_costs = fixed_om_costs + variable_om_costs
 
-    total_costs = total_om_costs + loan_payments
-    cost_pv = equity_investment + np.sum(total_costs * discount_factors)
+    cost_pv = total_investment + np.sum(total_om_costs * discount_factors)
 
     salvage_value = total_investment * salvage_rate / 100.0
     salvage_pv = salvage_value * discount_factors[-1]
@@ -222,7 +210,7 @@ def calculate_payback_period(
     cumulative_cash_flow: np.ndarray,
 ) -> float:
     """
-    计算投资回收期 (精确到小数点后1位)
+    计算投资回收期 (精确值, 显示时再四舍五入)
     累计净现金流首次由负转正的年份
     返回: 回收期(年), 若项目寿命期内无法回收则返回项目寿命+1
     """
@@ -237,7 +225,7 @@ def calculate_payback_period(
             if positive_current - negative_last == 0:
                 return float(i + 1)
             fraction = (-negative_last) / (positive_current - negative_last)
-            return round(i + fraction, 1)
+            return i + fraction
 
     return float(n + 1)
 
@@ -312,9 +300,6 @@ def run_economic_analysis(
         params.discount_rate,
         project_lifetime,
         params.salvage_rate,
-        params.loan_ratio,
-        params.loan_interest_rate,
-        params.loan_tenor,
     )
 
     results.npv = calculate_npv(results.annual_cash_flow, params.discount_rate)

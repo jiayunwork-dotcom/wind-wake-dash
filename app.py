@@ -1128,6 +1128,7 @@ with tab_econ:
                         "选择分析参数",
                         ["电价", "投资成本", "折现率"],
                         horizontal=True,
+                        key="econ_sens_radio",
                     )
                     sens_param_map = {
                         "电价": "electricity_price",
@@ -1135,6 +1136,14 @@ with tab_econ:
                         "折现率": "discount_rate",
                     }
                     sens_param_name = sens_param_map[sens_param]
+
+                    if "last_sens_param" not in st.session_state:
+                        st.session_state.last_sens_param = None
+
+                    if st.session_state.last_sens_param != sens_param_name:
+                        st.session_state.sensitivity_econ_results = None
+                        st.session_state.last_sens_param = sens_param_name
+
                     run_sens = st.button(
                         "🔍 运行敏感性分析",
                         type="secondary",

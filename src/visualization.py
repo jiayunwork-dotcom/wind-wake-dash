@@ -679,12 +679,27 @@ def plot_cumulative_cash_flow(
     )
 
     if payback_period is not None and payback_period <= years[-1]:
-        pb_year = int(np.floor(payback_period))
-        if pb_year >= 1 and pb_year <= len(years):
+        exact_pb_x = None
+        exact_pb = payback_period
+        for i in range(len(cumulative_flow) - 1):
+            y0 = cumulative_flow[i]
+            y1 = cumulative_flow[i + 1]
+            if y0 <= 0 and y1 >= 0:
+                x0 = years[i]
+                x1 = years[i + 1]
+                if y1 != y0:
+                    exact_pb_x = x0 + (0 - y0) / (y1 - y0) * (x1 - x0)
+                    exact_pb = exact_pb_x
+                else:
+                    exact_pb_x = x0
+                    exact_pb = x0
+                break
+
+        if exact_pb_x is not None:
             fig.add_annotation(
-                x=payback_period,
+                x=exact_pb_x,
                 y=0,
-                text=f"★ 投资回收期: {payback_period:.1f} 年",
+                text=f"★ 投资回收期: {exact_pb:.1f} 年",
                 showarrow=True,
                 arrowhead=2,
                 arrowsize=1.5,
@@ -699,12 +714,12 @@ def plot_cumulative_cash_flow(
             )
 
             fig.add_trace(go.Scatter(
-                x=[payback_period],
+                x=[exact_pb_x],
                 y=[0],
                 mode="markers",
                 marker=dict(size=14, color="red", symbol="circle"),
                 name="投资回收点",
-                hovertemplate=f"回收期: {payback_period:.1f} 年<extra></extra>",
+                hovertemplate=f"回收期: {exact_pb:.1f} 年<extra></extra>",
             ))
 
     fig.update_layout(
