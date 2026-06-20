@@ -62,7 +62,8 @@ def plot_farm_layout(coords: np.ndarray,
     fig = go.Figure()
 
     if show_wake_cones and wind_direction is not None:
-        theta = _meteorological_to_math(wind_direction)
+        blow_to_meteo = (wind_direction + 180.0) % 360.0
+        theta = _meteorological_to_math(blow_to_meteo)
         dir_x = np.cos(theta)
         dir_y = np.sin(theta)
         perp_x = -dir_y
@@ -143,7 +144,8 @@ def plot_farm_layout(coords: np.ndarray,
     if wind_direction is not None:
         cx = coords[:, 0].mean()
         cy = coords[:, 1].max() + max(rotor_radii) * 3
-        theta = _meteorological_to_math(wind_direction)
+        blow_to_meteo = (wind_direction + 180.0) % 360.0
+        theta = _meteorological_to_math(blow_to_meteo)
         arrow_len = max(200, max(rotor_radii) * 2)
 
         fig.add_annotation(

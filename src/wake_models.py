@@ -111,7 +111,8 @@ def _wake_geometry(upstream_pos: np.ndarray,
     -------
     x_rel, y_rel, in_wake, x_downstream, wake_width_at_target
     """
-    theta_math = _meteorological_to_math(wind_direction_from)
+    blow_to_meteo = (wind_direction_from + 180.0) % 360.0
+    theta_math = np.radians(90.0 - blow_to_meteo)
 
     dx = target_pos[0] - upstream_pos[0]
     dy = target_pos[1] - upstream_pos[1]
@@ -149,19 +150,21 @@ def _meteorological_to_math(meteorological_deg: float) -> float:
 
 def rotate_coordinates(coords: np.ndarray, wind_direction_from: float) -> np.ndarray:
     """
-    将坐标系旋转, 使风向(风来的方向)对齐 -X 轴方向
-    等价于: 风吹向的方向对齐 +X 轴
+    将坐标系旋转, 使风吹向的方向与 +X 轴对齐
+    风从 wind_direction_from 方向吹来, 下游风机将有更大的 x 坐标
 
     coords: (N, 2) 原始坐标
     wind_direction_from: 气象风向, 风来的方向 (北0度, 顺时针)
     """
-    theta = _meteorological_to_math(wind_direction_from)
-    cos_t = np.cos(theta)
-    sin_t = np.sin(theta)
+    blow_to_meteo = (wind_direction_from + 180.0) % 360.0
+    blow_to_math = np.radians(90.0 - blow_to_meteo)
+    theta = blow_to_math
 
+    cos_t = np.cos(-theta)
+    sin_t = np.sin(-theta)
     rot_matrix = np.array([
-        [cos_t, sin_t],
-        [-sin_t, cos_t]
+        [cos_t, -sin_t],
+        [sin_t, cos_t]
     ])
     rotated = coords @ rot_matrix.T
     return rotated
@@ -238,11 +241,17 @@ def combined_deficit_matrix(rotated_coords: np.ndarray,
 
     if superposition == "linear":
         total_deficits = np.sum(deficit_matrix, axis=1)
-    else:
+        total_deficits = np.clip(total_deficits, 0.0, 0.95)
+        effective_wind_speeds = ambient_wind_speed * (1.0 - total_deficits)
+    elif superposition == "rms":
         total_deficits = np.sqrt(np.sum(deficit_matrix ** 2, axis=1))
-
-    total_deficits = np.clip(total_deficits, 0.0, 0.99)
-    effective_wind_speeds = ambient_wind_speed * (1.0 - total_deficits)
+        total_deficits = np.clip(total_deficits, 0.0, 0.95)
+        effective_wind_speeds = ambient_wind_speed * (1.0 - total_deficits)
+    else:
+        one_minus_d = 1.0 - np.clip(deficit_matrix, 0.0, 0.95)
+        v_ratio = np.prod(one_minus_d, axis=1)
+        effective_wind_speeds = ambient_wind_speed * v_ratio
+        total_deficits = 1.0 - v_ratio
 
     return deficit_matrix, effective_wind_speeds
 

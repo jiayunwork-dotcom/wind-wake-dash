@@ -125,10 +125,15 @@ with st.sidebar:
 
     superposition = st.selectbox(
         "多尾流叠加策略",
-        ["线性叠加 (Linear)", "均方根叠加 (RMS)"],
+        ["动能叠加 (乘积, 推荐)", "线性叠加 (Linear)", "均方根叠加 (RMS)"],
         index=0,
+        help="动能叠加: V_eff = V0 × Π(1-ΔV_i/V0), 物理上更合理; 线性叠加: ΔV=ΣΔV_i"
     )
-    SUPER_MAP = {"线性叠加 (Linear)": "linear", "均方根叠加 (RMS)": "rms"}
+    SUPER_MAP = {
+        "动能叠加 (乘积, 推荐)": "kinetic",
+        "线性叠加 (Linear)": "linear",
+        "均方根叠加 (RMS)": "rms",
+    }
     superposition_code = SUPER_MAP[superposition]
 
     st.session_state.turbulence_intensity = st.slider(
