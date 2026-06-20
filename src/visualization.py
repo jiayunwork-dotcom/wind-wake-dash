@@ -475,6 +475,82 @@ def plot_loss_matrix_heatmap(loss_matrix: np.ndarray,
     return fig
 
 
+def plot_sensitivity_heatmap(alpha_values: np.ndarray,
+                             ti_values: np.ndarray,
+                             aep_matrix: np.ndarray,
+                             title: str = "参数敏感性分析 — AEP热力图") -> go.Figure:
+    """
+    alpha-TI参数敏感性热力图
+    横轴alpha, 纵轴TI, 色块=AEP(GWh)
+    """
+    alpha_labels = [f"{v:.3f}" for v in alpha_values]
+    ti_labels = [f"{v:.2f}" for v in ti_values]
+
+    fig = go.Figure(go.Heatmap(
+        z=aep_matrix,
+        x=alpha_labels,
+        y=ti_labels,
+        colorscale="Viridis",
+        hovertemplate="α=%{x}<br>TI=%{y}<br>AEP=%{z:.4f} GWh<extra></extra>",
+        colorbar=dict(title="AEP (GWh)"),
+        text=np.round(aep_matrix, 4),
+        texttemplate="%{text}",
+        textfont=dict(size=9),
+    ))
+    fig.update_layout(
+        title=title,
+        xaxis_title="尾流扩展系数 α",
+        yaxis_title="湍流强度 TI",
+        height=550,
+    )
+    return fig
+
+
+def plot_model_comparison_wind_speed(turbine_ids: List[str],
+                                      jensen_ws: np.ndarray,
+                                      bastankhah_ws: np.ndarray,
+                                      jensen_powers_kw: np.ndarray,
+                                      bastankhah_powers_kw: np.ndarray,
+                                      title: str = "Jensen vs Bastankhah 模型对比") -> go.Figure:
+    """
+    两种尾流模型下各风机有效入流风速对比 (实线=Jensen, 虚线=Bastankhah)
+    """
+    fig = go.Figure()
+
+    fig.add_trace(go.Scatter(
+        x=list(range(len(turbine_ids))),
+        y=jensen_ws,
+        mode="lines+markers",
+        name="Jensen (Park)",
+        line=dict(color="royalblue", width=2),
+        hovertemplate="风机: %{x}<br>Jensen风速: %{y:.2f} m/s<extra></extra>",
+    ))
+
+    fig.add_trace(go.Scatter(
+        x=list(range(len(turbine_ids))),
+        y=bastankhah_ws,
+        mode="lines+markers",
+        name="Bastankhah 高斯",
+        line=dict(color="crimson", width=2, dash="dash"),
+        hovertemplate="风机: %{x}<br>Bastankhah风速: %{y:.2f} m/s<extra></extra>",
+    ))
+
+    fig.update_layout(
+        title=title,
+        xaxis=dict(
+            title="风机编号",
+            tickmode="array",
+            tickvals=list(range(len(turbine_ids))),
+            ticktext=turbine_ids,
+            tickangle=-45,
+        ),
+        yaxis_title="有效入流风速 (m/s)",
+        height=500,
+        legend=dict(orientation="h", yanchor="bottom", y=1.05, xanchor="center", x=0.5),
+    )
+    return fig
+
+
 def plot_power_curve(turbine_params: Dict, name: str) -> go.Figure:
     """
     绘制功率曲线和推力系数曲线 (双Y轴)

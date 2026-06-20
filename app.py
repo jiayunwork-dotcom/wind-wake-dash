@@ -28,6 +28,7 @@ from src import (
     check_spacing_constraint,
     compute_turbine_params_array,
     genetic_algorithm_layout_optimize,
+    sensitivity_scan_alpha_ti,
     plot_farm_layout,
     plot_power_rose,
     plot_wake_loss_bar,
@@ -36,6 +37,8 @@ from src import (
     plot_layout_comparison,
     plot_loss_matrix_heatmap,
     plot_power_curve,
+    plot_sensitivity_heatmap,
+    plot_model_comparison_wind_speed,
     sample_rose_from_frequency,
     mean_wind_speed_from_frequency,
 )
@@ -81,6 +84,7 @@ default_state = {
     "rose_results": None,
     "opt_results": None,
     "single_dir_results": None,
+    "sensitivity_results": None,
     "spacing_checked": False,
     "spacing_ok": False,
     "spacing_min_ratio": 1.0,
@@ -161,7 +165,7 @@ with st.sidebar:
 # ============================================================
 # 主区域 - Tab 布局
 # ============================================================
-tab_overview, tab_turbines, tab_layout, tab_wind, tab_single, tab_aep, tab_opt = \
+tab_overview, tab_turbines, tab_layout, tab_wind, tab_single, tab_aep, tab_sensitivity, tab_opt = \
     st.tabs([
         "📊 总览面板",
         "⚙️ 机型管理",
@@ -169,6 +173,7 @@ tab_overview, tab_turbines, tab_layout, tab_wind, tab_single, tab_aep, tab_opt =
         "🌬️ 风资源数据",
         "🧭 单风向分析",
         "📈 AEP与损失分析",
+        "🔬 参数敏感性分析",
         "🧬 布局优化",
     ])
 
@@ -502,6 +507,8 @@ with tab_single:
             run_single = st.button("▶️ 计算此工况", type="primary")
 
         show_wake = st.checkbox("显示尾流锥形区域", value=True)
+        enable_model_compare = st.checkbox("🔀 模型对比 (Jensen vs Bastankhah)", value=False,
+                                           help="开启后同时用两种模型计算, 展示风速和功率差异")
 
         if run_single or st.session_state.single_dir_results is not None:
             if run_single:
@@ -537,6 +544,67 @@ with tab_single:
                 title=f"风场俯视图 - 风向 {analysis_direction}°, 风速 {analysis_ws:.1f} m/s",
             )
             st.plotly_chart(fig, use_container_width=True)
+
+            if enable_model_compare:
+                st.subheader("🔀 模型对比: Jensen (Park) vs Bastankhah 高斯")
+                with st.spinner("正在用两种模型分别计算..."):
+                    res_jensen = compute_power_for_direction_windspeed(
+                        st.session_state.farm_coords,
+                        st.session_state.turbine_library,
+                        st.session_state.farm_models,
+                        analysis_direction, analysis_ws,
+                        "jensen", alpha,
+                        st.session_state.turbulence_intensity,
+                        superposition_code,
+                    )
+                    res_bastankhah = compute_power_for_direction_windspeed(
+                        st.session_state.farm_coords,
+                        st.session_state.turbine_library,
+                        st.session_state.farm_models,
+                        analysis_direction, analysis_ws,
+                        "bastankhah", alpha,
+                        st.session_state.turbulence_intensity,
+                        superposition_code,
+                    )
+
+                mc1, mc2, mc3, mc4 = st.columns(4)
+                mc1.metric("Jensen 全场功率", f"{res_jensen['total_power_kw']/1000:.2f} MW")
+                mc2.metric("Bastankhah 全场功率", f"{res_bastankhah['total_power_kw']/1000:.2f} MW")
+                power_diff = res_bastankhah['total_power_kw'] - res_jensen['total_power_kw']
+                power_diff_pct = power_diff / max(res_jensen['total_power_kw'], 1) * 100
+                mc3.metric("功率差异", f"{power_diff/1000:+.2f} MW",
+                           delta=f"{power_diff_pct:+.2f}%")
+                mc4.metric("Jensen损失 vs Bastankhah损失",
+                           f"{res_jensen['overall_loss']*100:.2f}% vs {res_bastankhah['overall_loss']*100:.2f}%")
+
+                cmp_fig = plot_model_comparison_wind_speed(
+                    st.session_state.farm_ids,
+                    res_jensen["effective_wind_speeds"],
+                    res_bastankhah["effective_wind_speeds"],
+                    res_jensen["turbine_powers_kw"],
+                    res_bastankhah["turbine_powers_kw"],
+                    title=f"有效入流风速对比 — 风向 {analysis_direction}°, 风速 {analysis_ws:.1f} m/s",
+                )
+                st.plotly_chart(cmp_fig, use_container_width=True)
+
+                power_diff_pct_arr = np.where(
+                    res_jensen["turbine_powers_kw"] > 0,
+                    (res_bastankhah["turbine_powers_kw"] - res_jensen["turbine_powers_kw"])
+                    / res_jensen["turbine_powers_kw"] * 100.0,
+                    0.0,
+                )
+                df_cmp = pd.DataFrame({
+                    "风机": st.session_state.farm_ids,
+                    "机型": st.session_state.farm_models,
+                    "Jensen风速 (m/s)": res_jensen["effective_wind_speeds"].round(2),
+                    "Bastankhah风速 (m/s)": res_bastankhah["effective_wind_speeds"].round(2),
+                    "风速差 (m/s)": (res_bastankhah["effective_wind_speeds"] - res_jensen["effective_wind_speeds"]).round(2),
+                    "Jensen功率 (kW)": res_jensen["turbine_powers_kw"].round(1),
+                    "Bastankhah功率 (kW)": res_bastankhah["turbine_powers_kw"].round(1),
+                    "功率差异 (%)": power_diff_pct_arr.round(2),
+                })
+                st.dataframe(df_cmp, use_container_width=True, hide_index=True)
+                st.divider()
 
             c_fig1, c_fig2 = st.columns([1.2, 1])
             with c_fig1:
@@ -739,7 +807,155 @@ with tab_aep:
 
 
 # ============================================================
-# Tab 6: 布局优化
+# Tab 7: 参数敏感性分析
+# ============================================================
+with tab_sensitivity:
+    st.header("🔬 参数敏感性分析")
+    st.markdown(
+        "扫描不同的尾流扩展系数 **α** 和湍流强度 **TI** 组合, "
+        "计算每种组合下的全场AEP, 生成热力图, 辅助选择最优参数。"
+    )
+
+    data_ready = (
+        st.session_state.farm_coords is not None
+        and st.session_state.wind_freq is not None
+    )
+    if not data_ready:
+        st.warning("⚠️ 请先完成『风电场布局』和『风资源数据』配置")
+    else:
+        sc1, sc2 = st.columns(2)
+        with sc1:
+            st.subheader("📏 尾流扩展系数 α 扫描范围")
+            alpha_min = st.number_input("α 最小值", value=0.02, min_value=0.01, max_value=0.14,
+                                        step=0.01, format="%.3f", key="sens_alpha_min")
+            alpha_max = st.number_input("α 最大值", value=0.15, min_value=0.03, max_value=0.20,
+                                        step=0.01, format="%.3f", key="sens_alpha_max")
+            alpha_steps = st.number_input("α 扫描步数", value=10, min_value=2, max_value=30,
+                                          step=1, key="sens_alpha_steps",
+                                          help="建议默认10步, 步数越多计算越慢")
+        with sc2:
+            st.subheader("💨 湍流强度 TI 扫描范围")
+            ti_min = st.number_input("TI 最小值", value=0.02, min_value=0.01, max_value=0.20,
+                                     step=0.01, format="%.2f", key="sens_ti_min")
+            ti_max = st.number_input("TI 最大值", value=0.25, min_value=0.03, max_value=0.50,
+                                     step=0.01, format="%.2f", key="sens_ti_max")
+            ti_steps = st.number_input("TI 扫描步数", value=10, min_value=2, max_value=30,
+                                       step=1, key="sens_ti_steps",
+                                       help="建议默认10步, 步数越多计算越慢")
+
+        alpha_values = np.linspace(alpha_min, alpha_max, int(alpha_steps))
+        ti_values = np.linspace(ti_min, ti_max, int(ti_steps))
+        total_combos = len(alpha_values) * len(ti_values)
+
+        st.info(
+            f"待扫描参数组合: **{len(alpha_values)}** (α) × **{len(ti_values)}** (TI) = "
+            f"**{total_combos}** 组合 | "
+            f"每组需遍历 {len(st.session_state.wind_directions)} 风向 × "
+            f"{len(st.session_state.wind_speeds)} 风速"
+        )
+
+        run_sensitivity = st.button("🚀 开始敏感性分析", type="primary")
+
+        if total_combos > 50 and run_sensitivity:
+            st.warning(
+                f"⚠️ 参数组合数 **{total_combos}** 超过50, 预计耗时较长。"
+                f"每组合需扫描全部风向×风速工况, 请耐心等待。"
+            )
+            confirm = st.checkbox("我已了解, 确认继续", key="sens_confirm")
+            if not confirm:
+                run_sensitivity = False
+
+        if run_sensitivity or st.session_state.sensitivity_results is not None:
+            if run_sensitivity:
+                progress_bar = st.progress(0.0, text="敏感性分析: 0 / 0")
+                status_text = st.empty()
+
+                def _sens_progress_cb(completed, total):
+                    pct = completed / max(total, 1)
+                    progress_bar.progress(min(pct, 1.0))
+                    status_text.text(f"敏感性分析: {completed} / {total} 组合已完成 ({pct*100:.1f}%)")
+
+                with st.spinner("参数敏感性分析中..."):
+                    sens_result = sensitivity_scan_alpha_ti(
+                        st.session_state.farm_coords,
+                        st.session_state.turbine_library,
+                        st.session_state.farm_models,
+                        st.session_state.wind_directions,
+                        st.session_state.wind_speeds,
+                        st.session_state.wind_freq,
+                        alpha_values,
+                        ti_values,
+                        wake_model_code,
+                        superposition_code,
+                        progress_callback=_sens_progress_cb,
+                    )
+                    st.session_state.sensitivity_results = sens_result
+
+                progress_bar.progress(1.0)
+                status_text.success("✅ 敏感性分析完成!")
+
+            if st.session_state.sensitivity_results is not None:
+                sens = st.session_state.sensitivity_results
+
+                st.subheader("🗺️ AEP参数敏感性热力图")
+                heatmap_fig = plot_sensitivity_heatmap(
+                    sens["alpha_values"],
+                    sens["ti_values"],
+                    sens["aep_matrix"],
+                )
+                st.plotly_chart(heatmap_fig, use_container_width=True)
+
+                st.subheader("📋 参数建议卡片")
+                abs_diff = sens["best_aep"] - sens["worst_aep"]
+                pct_diff = abs_diff / max(sens["worst_aep"], 1e-9) * 100.0
+
+                c_best, c_worst, c_diff = st.columns(3)
+                with c_best:
+                    st.success(
+                        f"🟢 **AEP最高组合**\n\n"
+                        f"α = {sens['best_alpha']:.3f}  |  TI = {sens['best_ti']:.2f}\n\n"
+                        f"AEP = **{sens['best_aep']:.4f} GWh**"
+                    )
+                with c_worst:
+                    st.error(
+                        f"🔴 **AEP最低组合**\n\n"
+                        f"α = {sens['worst_alpha']:.3f}  |  TI = {sens['worst_ti']:.2f}\n\n"
+                        f"AEP = **{sens['worst_aep']:.4f} GWh**"
+                    )
+                with c_diff:
+                    st.info(
+                        f"📊 **差异分析**\n\n"
+                        f"绝对差值: **{abs_diff:.4f} GWh**\n\n"
+                        f"百分比差异: **{pct_diff:.2f}%**"
+                    )
+
+                alpha_col_min = sens["aep_matrix"].min(axis=0)
+                alpha_col_max = sens["aep_matrix"].max(axis=0)
+                alpha_range_pct = (alpha_col_max - alpha_col_min) / alpha_col_min * 100.0
+                max_range_idx = int(np.argmax(alpha_range_pct))
+                max_range_alpha = sens["alpha_values"][max_range_idx]
+
+                suggestion = (
+                    f"α从{sens['alpha_values'][0]:.3f}到{sens['alpha_values'][-1]:.3f}时, "
+                    f"AEP变化最大达{alpha_range_pct.max():.2f}%, "
+                    f"建议重点关注α≈{max_range_alpha:.3f}附近的参数区间; "
+                    f"TI对AEP的影响范围为"
+                    f"{(sens['aep_matrix'].max(axis=1) - sens['aep_matrix'].min(axis=1)).min() / sens['aep_matrix'].min() * 100:.2f}%"
+                    f"~{(sens['aep_matrix'].max(axis=1) - sens['aep_matrix'].min(axis=1)).max() / sens['aep_matrix'].min(axis=0).min() * 100:.2f}%。"
+                )
+                st.markdown(f"💡 **建议**: {suggestion}")
+
+                with st.expander("📋 完整AEP矩阵数据 (GWh)"):
+                    df_sens = pd.DataFrame(
+                        sens["aep_matrix"].round(4),
+                        index=[f"TI={v:.2f}" for v in sens["ti_values"]],
+                        columns=[f"α={v:.3f}" for v in sens["alpha_values"]],
+                    )
+                    st.dataframe(df_sens, use_container_width=True)
+
+
+# ============================================================
+# Tab 8: 布局优化
 # ============================================================
 with tab_opt:
     st.header("🧬 布局优化 (遗传算法)")
@@ -937,7 +1153,8 @@ with tab_overview:
         3. **🌬️ 风资源数据** — 生成/上传风向风速频率表
         4. **🧭 单风向分析** — 指定风向风速查看尾流细节
         5. **📈 AEP与损失分析** — 全场扫描, 计算AEP和尾流损失
-        6. **🧬 布局优化** — 遗传算法优化风机位置, 最大化AEP
+        6. **🔬 参数敏感性分析** — 扫描α和TI对AEP的影响, 辅助参数选择
+        7. **🧬 布局优化** — 遗传算法优化风机位置, 最大化AEP
         """
     )
 

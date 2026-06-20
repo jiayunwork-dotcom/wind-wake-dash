@@ -36,6 +36,7 @@ from .power_calculation import (
     scan_direction_rose,
     check_spacing_constraint,
     compute_turbine_params_array,
+    sensitivity_scan_alpha_ti,
 )
 
 from .layout_optimization import (
@@ -52,6 +53,8 @@ from .visualization import (
     plot_layout_comparison,
     plot_loss_matrix_heatmap,
     plot_power_curve,
+    plot_sensitivity_heatmap,
+    plot_model_comparison_wind_speed,
 )
 
 __all__ = [
@@ -78,6 +81,7 @@ __all__ = [
     "scan_direction_rose",
     "check_spacing_constraint",
     "compute_turbine_params_array",
+    "sensitivity_scan_alpha_ti",
     "genetic_algorithm_layout_optimize",
     "evaluate_aep",
     "plot_farm_layout",
@@ -88,4 +92,6 @@ __all__ = [
     "plot_layout_comparison",
     "plot_loss_matrix_heatmap",
     "plot_power_curve",
+    "plot_sensitivity_heatmap",
+    "plot_model_comparison_wind_speed",
 ]

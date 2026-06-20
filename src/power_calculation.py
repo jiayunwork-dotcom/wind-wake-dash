@@ -317,6 +317,70 @@ def scan_direction_rose(coords: np.ndarray,
     }
 
 
+def sensitivity_scan_alpha_ti(coords: np.ndarray,
+                              turbine_library: Dict[str, Dict],
+                              model_names: List[str],
+                              directions: np.ndarray,
+                              wind_speeds: np.ndarray,
+                              frequency_matrix: np.ndarray,
+                              alpha_values: np.ndarray,
+                              ti_values: np.ndarray,
+                              wake_model: str = "jensen",
+                              superposition: str = "linear",
+                              progress_callback=None) -> Dict:
+    """
+    参数敏感性分析: 扫描alpha和TI的所有组合, 对每个组合计算AEP
+
+    Parameters
+    ----------
+    alpha_values : (A,) 尾流扩展系数扫描序列
+    ti_values : (T,) 湍流强度扫描序列
+    progress_callback : 可选回调 fn(completed, total)
+
+    Returns
+    -------
+    Dict:
+        alpha_values, ti_values: 输入参数
+        aep_matrix: (T, A) AEP矩阵 (GWh), 行=TI, 列=alpha
+        best_alpha, best_ti, best_aep: AEP最高的组合
+        worst_alpha, worst_ti, worst_aep: AEP最低的组合
+    """
+    A = len(alpha_values)
+    T = len(ti_values)
+    total = A * T
+    aep_matrix = np.zeros((T, A))
+
+    completed = 0
+    for ai, a_val in enumerate(alpha_values):
+        for ti_i, ti_val in enumerate(ti_values):
+            result = scan_all_directions_windspeeds(
+                coords, turbine_library, model_names,
+                directions, wind_speeds, frequency_matrix,
+                wake_model, a_val, ti_val, superposition,
+            )
+            aep_matrix[ti_i, ai] = result["aep_kwh"] / 1e6
+            completed += 1
+            if progress_callback is not None:
+                progress_callback(completed, total)
+
+    best_flat = np.argmax(aep_matrix)
+    best_ti_idx, best_alpha_idx = np.unravel_index(best_flat, aep_matrix.shape)
+    worst_flat = np.argmin(aep_matrix)
+    worst_ti_idx, worst_alpha_idx = np.unravel_index(worst_flat, aep_matrix.shape)
+
+    return {
+        "alpha_values": alpha_values,
+        "ti_values": ti_values,
+        "aep_matrix": aep_matrix,
+        "best_alpha": alpha_values[best_alpha_idx],
+        "best_ti": ti_values[best_ti_idx],
+        "best_aep": aep_matrix[best_ti_idx, best_alpha_idx],
+        "worst_alpha": alpha_values[worst_alpha_idx],
+        "worst_ti": ti_values[worst_ti_idx],
+        "worst_aep": aep_matrix[worst_ti_idx, worst_alpha_idx],
+    }
+
+
 def check_spacing_constraint(coords: np.ndarray,
                              rotor_diameters: np.ndarray,
                              min_spacing_multiple: float = 2.0) -> Tuple[bool, np.ndarray, float]:
