@@ -1161,9 +1161,10 @@ with tab_econ:
                         detail_df = pd.concat([detail_df, total_row], ignore_index=True)
                         st.dataframe(detail_df, use_container_width=True, hide_index=True)
 
+                        equity_investment = total_investment * (1 - loan_ratio / 100.0)
                         st.caption(
-                            f"💡 **说明**: 累计折现净现金流期末值 = NPV + 初始投资折现值 ≈ "
-                            f"{results.npv + total_investment * discount_factors[0]:.2f} 万元"
+                            f"💡 **说明**: 累计折现净现金流期末值 = NPV + 自有资金初始投资(t=0) ≈ "
+                            f"{results.npv + equity_investment:.2f} 万元"
                         )
 
                         st.divider()
@@ -1233,6 +1234,17 @@ with tab_econ:
                         st.divider()
                         st.subheader("💾 导出分析结果")
 
+                        export_unit_map = {
+                            "electricity_price": "元/kWh",
+                            "total_investment": "万元",
+                            "discount_rate": "%",
+                        }
+                        export_base_val_map = {
+                            "electricity_price": electricity_price_1,
+                            "total_investment": total_investment,
+                            "discount_rate": discount_rate,
+                        }
+
                         export_data = {
                             "project_name": st.session_state.project_name,
                             "export_time": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -1287,8 +1299,16 @@ with tab_econ:
                         if st.session_state.sensitivity_econ_results is not None:
                             _, _, crit_val = st.session_state.sensitivity_econ_results
                             if crit_val is not None:
-                                unit = unit_map.get(sens_param_name, "")
-                                sens_conclusion = f"敏感性分析显示，当{sens_param}达到 {crit_val:.4f} {unit} 时，项目NPV为零（盈亏平衡点）。当前{sens_param}为 {base_value:.4f} {unit}。"
+                                unit = export_unit_map.get(sens_param_name, "")
+                                export_base_value = export_base_val_map[sens_param_name]
+                                sens_conclusion = f"敏感性分析显示，当{sens_param}达到 {crit_val:.4f} {unit} 时，项目NPV为零（盈亏平衡点）。当前{sens_param}为 {export_base_value:.4f} {unit}。"
+                            else:
+                                if sens_param == "电价":
+                                    sens_conclusion = f"敏感性分析显示，在测试的{sens_param}波动范围内NPV始终为正（或始终为负），不存在NPV=0的临界点。"
+                                elif sens_param == "投资成本":
+                                    sens_conclusion = f"敏感性分析显示，在测试的{sens_param}波动范围内NPV始终为正（或始终为负），不存在NPV=0的临界点。"
+                                else:
+                                    sens_conclusion = f"敏感性分析显示，在测试的{sens_param}波动范围内NPV始终为正（或始终为负），不存在NPV=0的临界点。"
 
                         risk_conclusion = ""
                         if st.session_state.risk_matrix_results is not None:
