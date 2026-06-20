@@ -384,3 +384,50 @@ def run_sensitivity_analysis(
             critical_value = x0 - y0 * (x1 - x0) / (y1 - y0)
 
     return param_values, npv_values, critical_value
+
+
+def run_risk_matrix_analysis(
+    base_params: EconomicParams,
+    price_variation_pct: float = 20.0,
+    investment_variation_pct: float = 20.0,
+    num_points: int = 5,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    双变量风险评估矩阵: 同时扫描电价和投资成本, 计算每个组合的NPV
+
+    参数:
+        base_params: 基准参数
+        price_variation_pct: 电价变化范围 (±%)
+        investment_variation_pct: 投资成本变化范围 (±%)
+        num_points: 每个维度的扫描点数
+
+    返回:
+        price_pcts: 电价变化百分比数组 (横轴)
+        investment_pcts: 投资成本变化百分比数组 (纵轴)
+        npv_matrix: NPV矩阵 (shape: [num_points, num_points]), 行=投资成本, 列=电价
+    """
+    base_price = base_params.electricity_price_1
+    base_investment = base_params.total_investment
+
+    price_pcts = np.linspace(-price_variation_pct, price_variation_pct, num_points)
+    investment_pcts = np.linspace(-investment_variation_pct, investment_variation_pct, num_points)
+
+    npv_matrix = np.zeros((num_points, num_points))
+
+    for i, inv_pct in enumerate(investment_pcts):
+        for j, price_pct in enumerate(price_pcts):
+            test_params = EconomicParams()
+            for k, v in base_params.__dict__.items():
+                if isinstance(v, np.ndarray):
+                    setattr(test_params, k, v.copy())
+                else:
+                    setattr(test_params, k, v)
+
+            test_params.electricity_price_1 = base_price * (1 + price_pct / 100.0)
+            test_params.electricity_price_2 = base_params.electricity_price_2 * (1 + price_pct / 100.0)
+            test_params.total_investment = base_investment * (1 + inv_pct / 100.0)
+
+            results = run_economic_analysis(test_params)
+            npv_matrix[i, j] = results.npv
+
+    return price_pcts, investment_pcts, npv_matrix

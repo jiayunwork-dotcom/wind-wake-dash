@@ -58,6 +58,8 @@ from .visualization import (
     plot_cash_flow_lines,
     plot_cumulative_cash_flow,
     plot_sensitivity_curve,
+    plot_scenario_comparison,
+    plot_risk_heatmap,
 )
 
 from .economic_analysis import (
@@ -72,6 +74,7 @@ from .economic_analysis import (
     calculate_payback_period,
     run_economic_analysis,
     run_sensitivity_analysis,
+    run_risk_matrix_analysis,
 )
 
 __all__ = [
@@ -114,6 +117,8 @@ __all__ = [
     "plot_cash_flow_lines",
     "plot_cumulative_cash_flow",
     "plot_sensitivity_curve",
+    "plot_scenario_comparison",
+    "plot_risk_heatmap",
     "EconomicParams",
     "EconomicResults",
     "calculate_loan_payment",
@@ -125,4 +130,5 @@ __all__ = [
     "calculate_payback_period",
     "run_economic_analysis",
     "run_sensitivity_analysis",
+    "run_risk_matrix_analysis",
 ]

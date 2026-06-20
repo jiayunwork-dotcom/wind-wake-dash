@@ -830,3 +830,187 @@ def plot_sensitivity_curve(
     )
 
     return fig
+
+
+def plot_scenario_comparison(
+    scenario_names: List[str],
+    lcoe_values: List[float],
+    npv_values: List[float],
+    irr_values: List[float],
+    payback_values: List[float],
+    title: str = "多方案经济指标对比",
+) -> go.Figure:
+    """
+    多方案对比分组柱状图: 每个方案一组柱子, 对比LCOE、NPV、IRR、回收期
+    """
+    fig = go.Figure()
+
+    colors = ["#3b82f6", "#22c55e", "#f59e0b", "#8b5cf6", "#ef4444"]
+
+    lcoe_normalized = []
+    if lcoe_values and max(lcoe_values) > 0:
+        lcoe_normalized = [v / max(lcoe_values) * 100 for v in lcoe_values]
+
+    npv_normalized = []
+    if npv_values:
+        max_abs_npv = max(abs(v) for v in npv_values) if npv_values else 1
+        if max_abs_npv > 0:
+            npv_normalized = [v / max_abs_npv * 100 for v in npv_values]
+
+    irr_normalized = []
+    if irr_values and max(irr_values) > 0:
+        irr_normalized = [v / max(irr_values) * 100 for v in irr_values]
+
+    pb_normalized = []
+    if payback_values and max(payback_values) > 0:
+        pb_normalized = [v / max(payback_values) * 100 for v in payback_values]
+
+    metrics = ["LCOE\n(元/kWh)", "NPV\n(万元)", "IRR\n(%)", "投资回收期\n(年)"]
+    metric_values = [lcoe_values, npv_values, irr_values, payback_values]
+
+    for i, name in enumerate(scenario_names):
+        y_vals = []
+        text_vals = []
+        for j, vals in enumerate(metric_values):
+            if i < len(vals):
+                y_vals.append(vals[i])
+                if j == 0:
+                    text_vals.append(f"{vals[i]:.4f}")
+                elif j == 1:
+                    text_vals.append(f"{vals[i]:.1f}")
+                elif j == 2:
+                    text_vals.append(f"{vals[i]:.2f}%")
+                else:
+                    text_vals.append(f"{vals[i]:.1f}年")
+            else:
+                y_vals.append(0)
+                text_vals.append("-")
+
+        color_idx = i % len(colors)
+        fig.add_trace(go.Bar(
+            name=name,
+            x=metrics,
+            y=y_vals,
+            text=text_vals,
+            textposition="outside",
+            marker_color=colors[color_idx],
+            marker_line_color="white",
+            marker_line_width=1,
+            hovertemplate=f"<b>{name}</b><br><extra></extra>",
+        ))
+
+    fig.update_layout(
+        title=title,
+        barmode="group",
+        height=500,
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5),
+        plot_bgcolor="rgba(245,245,245,0.3)",
+        yaxis_title="数值",
+        bargap=0.3,
+        bargroupgap=0.1,
+    )
+
+    return fig
+
+
+def plot_risk_heatmap(
+    price_pcts: np.ndarray,
+    investment_pcts: np.ndarray,
+    npv_matrix: np.ndarray,
+    title: str = "风险评估矩阵 — NPV热力图",
+) -> go.Figure:
+    """
+    风险评估热力图: 电价×投资成本双变量扫描, NPV热力图
+    颜色: 正值绿色系, 负值红色系, 以零为分界
+    叠加NPV=0等值线
+    """
+    fig = go.Figure()
+
+    max_abs = max(abs(npv_matrix.min()), abs(npv_matrix.max()))
+    if max_abs == 0:
+        max_abs = 1
+
+    x_labels = [f"{v:+.0f}%" for v in price_pcts]
+    y_labels = [f"{v:+.0f}%" for v in investment_pcts]
+
+    npv_round = np.round(npv_matrix, 2)
+
+    colorscale = [
+        [0.0, "#991b1b"],
+        [0.25, "#ef4444"],
+        [0.45, "#fca5a5"],
+        [0.5, "#e5e7eb"],
+        [0.55, "#86efac"],
+        [0.75, "#22c55e"],
+        [1.0, "#166534"],
+    ]
+
+    fig.add_trace(go.Heatmap(
+        z=npv_matrix,
+        x=x_labels,
+        y=y_labels,
+        colorscale=colorscale,
+        zmid=0,
+        hovertemplate=(
+            "电价变化: %{x}<br>"
+            "投资成本变化: %{y}<br>"
+            "NPV: %{z:.2f} 万元<extra></extra>"
+        ),
+        colorbar=dict(title="NPV (万元)"),
+        text=npv_round,
+        texttemplate="%{text:.1f}",
+        textfont=dict(size=10),
+    ))
+
+    try:
+        from scipy.interpolate import RegularGridInterpolator
+        xi = np.linspace(0, len(price_pcts) - 1, 100)
+        yi = np.linspace(0, len(investment_pcts) - 1, 100)
+        xi_grid, yi_grid = np.meshgrid(xi, yi)
+
+        interp_func = RegularGridInterpolator(
+            (np.arange(len(investment_pcts)), np.arange(len(price_pcts))),
+            npv_matrix,
+            method="linear",
+        )
+        z_interp = interp_func((yi_grid, xi_grid))
+
+        contour_levels = [0]
+        fig.add_trace(go.Contour(
+            z=z_interp,
+            x=xi,
+            y=yi,
+            contours=dict(
+                type="constraint",
+                operation="=",
+                value=0,
+            ),
+            showscale=False,
+            line=dict(color="#fbbf24", width=3, dash="dash"),
+            name="NPV=0 盈亏线",
+            hoverinfo="skip",
+            showlegend=False,
+        ))
+    except ImportError:
+        pass
+
+    fig.update_layout(
+        title=title,
+        xaxis_title="电价变化百分比",
+        yaxis_title="投资成本变化百分比",
+        height=550,
+        plot_bgcolor="rgba(245,245,245,0.3)",
+    )
+
+    fig.add_annotation(
+        x=0.98, y=0.02,
+        xref="paper", yref="paper",
+        text="🟡 虚线 = NPV=0 盈亏边界",
+        showarrow=False,
+        font=dict(color="#d97706", size=11),
+        bgcolor="rgba(255,255,255,0.9)",
+        bordercolor="#fbbf24",
+        borderwidth=1,
+    )
+
+    return fig

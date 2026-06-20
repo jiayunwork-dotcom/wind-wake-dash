@@ -46,10 +46,13 @@ from src import (
     plot_cash_flow_lines,
     plot_cumulative_cash_flow,
     plot_sensitivity_curve,
+    plot_scenario_comparison,
+    plot_risk_heatmap,
     EconomicParams,
     EconomicResults,
     run_economic_analysis,
     run_sensitivity_analysis,
+    run_risk_matrix_analysis,
 )
 
 
@@ -101,6 +104,8 @@ default_state = {
     "economic_results": None,
     "sensitivity_econ_results": None,
     "project_name": "风电场项目",
+    "saved_scenarios": [],
+    "risk_matrix_results": None,
 }
 
 for k, v in default_state.items():
@@ -841,407 +846,773 @@ with tab_econ:
         aep_kwh = st.session_state.scanning_results["aep_kwh"]
         aep_gwh = aep_kwh / 1e6
 
-        left_col, right_col = st.columns([1, 1.2])
+        sub_tab_basic, sub_tab_compare, sub_tab_risk = st.tabs([
+            "📊 基础分析",
+            "🔄 方案对比",
+            "⚠️ 风险评估",
+        ])
 
-        with left_col:
-            st.subheader("📝 项目参数输入")
-            st.session_state.project_name = st.text_input(
-                "项目名称",
-                value=st.session_state.project_name,
-                help="用于导出文件名"
-            )
+        with sub_tab_basic:
+            left_col, right_col = st.columns([1, 1.2])
 
-            st.divider()
-            st.markdown("### 🏗️ 投资与融资")
-            c_inv1, c_inv2 = st.columns(2)
-            with c_inv1:
-                total_investment = st.number_input(
-                    "总投资成本 (万元)",
-                    min_value=0.0,
-                    value=5000.0,
-                    step=100.0,
-                    format="%.0f",
-                )
-            with c_inv2:
-                project_lifetime = st.number_input(
-                    "项目寿命 (年)",
-                    min_value=5,
-                    value=20,
-                    step=1,
+            with left_col:
+                st.subheader("📝 项目参数输入")
+                st.session_state.project_name = st.text_input(
+                    "项目名称",
+                    value=st.session_state.project_name,
+                    help="用于导出文件名"
                 )
 
-            st.markdown("### 📉 运维成本")
-            c_om1, c_om2 = st.columns(2)
-            with c_om1:
-                annual_fixed_om = st.number_input(
-                    "年固定运维成本 (万元/年)",
-                    min_value=0.0,
-                    value=80.0,
-                    step=5.0,
-                    format="%.1f",
-                )
-            with c_om2:
-                variable_om_unit = st.number_input(
-                    "可变运维单价 (元/kWh)",
-                    min_value=0.0,
-                    value=0.05,
-                    step=0.005,
-                    format="%.4f",
-                )
+                st.divider()
+                st.markdown("### 🏗️ 投资与融资")
+                c_inv1, c_inv2 = st.columns(2)
+                with c_inv1:
+                    total_investment = st.number_input(
+                        "总投资成本 (万元)",
+                        min_value=0.0,
+                        value=5000.0,
+                        step=100.0,
+                        format="%.0f",
+                    )
+                with c_inv2:
+                    project_lifetime = st.number_input(
+                        "项目寿命 (年)",
+                        min_value=5,
+                        value=20,
+                        step=1,
+                    )
 
-            st.markdown("### ⚡ 电价 (支持阶梯)")
-            c_p1, c_p2 = st.columns(2)
-            with c_p1:
-                electricity_price_1 = st.number_input(
-                    "前N年电价 (元/kWh)",
-                    min_value=0.0,
-                    value=0.45,
-                    step=0.01,
-                    format="%.4f",
-                )
-            with c_p2:
-                electricity_price_2 = st.number_input(
-                    "后续电价 (元/kWh)",
-                    min_value=0.0,
-                    value=0.35,
-                    step=0.01,
-                    format="%.4f",
-                )
-            price_switch_year = st.slider(
-                "电价切换年份",
-                min_value=1,
-                max_value=project_lifetime,
-                value=min(10, project_lifetime),
-                step=1,
-            )
+                st.markdown("### 📉 运维成本")
+                c_om1, c_om2 = st.columns(2)
+                with c_om1:
+                    annual_fixed_om = st.number_input(
+                        "年固定运维成本 (万元/年)",
+                        min_value=0.0,
+                        value=80.0,
+                        step=5.0,
+                        format="%.1f",
+                    )
+                with c_om2:
+                    variable_om_unit = st.number_input(
+                        "可变运维单价 (元/kWh)",
+                        min_value=0.0,
+                        value=0.05,
+                        step=0.005,
+                        format="%.4f",
+                    )
 
-            st.markdown("### 💰 财务参数")
-            c_f1, c_f2, c_f3 = st.columns(3)
-            with c_f1:
-                discount_rate = st.number_input(
-                    "折现率 (%)",
-                    min_value=0.0,
-                    value=6.0,
-                    step=0.5,
-                    format="%.2f",
-                )
-            with c_f2:
-                salvage_rate = st.number_input(
-                    "残值率 (%)",
-                    min_value=0.0,
-                    value=5.0,
-                    step=0.5,
-                    format="%.1f",
-                )
-            with c_f3:
-                power_decay = st.number_input(
-                    "年功率衰减 (%)",
-                    min_value=0.0,
-                    value=0.5,
-                    step=0.1,
-                    format="%.1f",
-                    help="每年发电量衰减比例"
-                )
-
-            st.markdown("### 🏦 贷款参数")
-            c_l1, c_l2, c_l3 = st.columns(3)
-            with c_l1:
-                loan_ratio = st.number_input(
-                    "贷款比例 (%)",
-                    min_value=0.0,
-                    max_value=100.0,
-                    value=70.0,
-                    step=5.0,
-                    format="%.1f",
-                )
-            with c_l2:
-                loan_interest_rate = st.number_input(
-                    "贷款年利率 (%)",
-                    min_value=0.0,
-                    value=4.5,
-                    step=0.1,
-                    format="%.2f",
-                )
-            with c_l3:
-                loan_tenor = st.number_input(
-                    "贷款年限 (年)",
+                st.markdown("### ⚡ 电价 (支持阶梯)")
+                c_p1, c_p2 = st.columns(2)
+                with c_p1:
+                    electricity_price_1 = st.number_input(
+                        "前N年电价 (元/kWh)",
+                        min_value=0.0,
+                        value=0.45,
+                        step=0.01,
+                        format="%.4f",
+                    )
+                with c_p2:
+                    electricity_price_2 = st.number_input(
+                        "后续电价 (元/kWh)",
+                        min_value=0.0,
+                        value=0.35,
+                        step=0.01,
+                        format="%.4f",
+                    )
+                price_switch_year = st.slider(
+                    "电价切换年份",
                     min_value=1,
                     max_value=project_lifetime,
-                    value=min(15, project_lifetime),
+                    value=min(10, project_lifetime),
                     step=1,
                 )
 
-            st.divider()
-            c_run, c_clear = st.columns(2)
-            with c_run:
-                run_econ = st.button(
-                    "🚀 计算经济指标",
-                    type="primary",
-                    use_container_width=True,
-                )
-            with c_clear:
-                if st.button("🔄 重置参数", use_container_width=True):
-                    st.session_state.economic_results = None
-                    st.session_state.sensitivity_econ_results = None
-                    st.rerun()
-
-            st.info(
-                f"📊 自动获取AEP: **{aep_gwh:.3f} GWh/年**\n\n"
-                f"贷款金额: **{total_investment * loan_ratio / 100:.0f} 万元** "
-                f"(自有资金: **{total_investment * (1 - loan_ratio / 100):.0f} 万元**)"
-            )
-
-        with right_col:
-            if run_econ or st.session_state.economic_results is not None:
-                if run_econ:
-                    params = EconomicParams(
-                        total_investment=total_investment,
-                        annual_fixed_om=annual_fixed_om,
-                        variable_om_unit=variable_om_unit,
-                        electricity_price_1=electricity_price_1,
-                        electricity_price_2=electricity_price_2,
-                        price_switch_year=price_switch_year,
-                        project_lifetime=project_lifetime,
-                        discount_rate=discount_rate,
-                        salvage_rate=salvage_rate,
-                        loan_ratio=loan_ratio,
-                        loan_interest_rate=loan_interest_rate,
-                        loan_tenor=loan_tenor,
-                        aep_kwh=aep_kwh,
-                        power_decay_rate=power_decay,
+                st.markdown("### 💰 财务参数")
+                c_f1, c_f2, c_f3 = st.columns(3)
+                with c_f1:
+                    discount_rate = st.number_input(
+                        "折现率 (%)",
+                        min_value=0.0,
+                        value=6.0,
+                        step=0.5,
+                        format="%.2f",
                     )
-                    st.session_state.economic_params = params
-                    with st.spinner("计算中..."):
-                        results = run_economic_analysis(params)
-                    st.session_state.economic_results = results
-
-                results = st.session_state.economic_results
-                params = st.session_state.economic_params
-
-                if results is not None:
-                    st.subheader("🎯 核心经济指标")
-                    k1, k2, k3, k4 = st.columns(4)
-
-                    lcoe_color = "normal"
-                    lcoe_delta = None
-                    if results.lcoe > 0 and electricity_price_1 > 0:
-                        diff = abs(electricity_price_1 - results.lcoe)
-                        if results.lcoe < electricity_price_1:
-                            pct = diff / max(results.lcoe, 1e-6) * 100
-                            lcoe_delta = f"-{pct:.1f}%"
-                            lcoe_color = "off"
-                        elif results.lcoe > electricity_price_1:
-                            pct = diff / max(electricity_price_1, 1e-6) * 100
-                            lcoe_delta = f"+{pct:.1f}%"
-                    k1.metric(
-                        "度电成本 LCOE",
-                        f"{results.lcoe:.4f} 元/kWh",
-                        delta=lcoe_delta,
-                        delta_color=lcoe_color,
+                with c_f2:
+                    salvage_rate = st.number_input(
+                        "残值率 (%)",
+                        min_value=0.0,
+                        value=5.0,
+                        step=0.5,
+                        format="%.1f",
+                    )
+                with c_f3:
+                    power_decay = st.number_input(
+                        "年功率衰减 (%)",
+                        min_value=0.0,
+                        value=0.5,
+                        step=0.1,
+                        format="%.1f",
+                        help="每年发电量衰减比例"
                     )
 
-                    npv_color = "normal"
-                    if results.npv > 0:
-                        npv_color = "off"
-                    k2.metric(
-                        "净现值 NPV",
-                        f"{results.npv:.2f} 万元",
-                        delta_color=npv_color,
+                st.markdown("### 🏦 贷款参数")
+                c_l1, c_l2, c_l3 = st.columns(3)
+                with c_l1:
+                    loan_ratio = st.number_input(
+                        "贷款比例 (%)",
+                        min_value=0.0,
+                        max_value=100.0,
+                        value=70.0,
+                        step=5.0,
+                        format="%.1f",
+                    )
+                with c_l2:
+                    loan_interest_rate = st.number_input(
+                        "贷款年利率 (%)",
+                        min_value=0.0,
+                        value=4.5,
+                        step=0.1,
+                        format="%.2f",
+                    )
+                with c_l3:
+                    loan_tenor = st.number_input(
+                        "贷款年限 (年)",
+                        min_value=1,
+                        max_value=project_lifetime,
+                        value=min(15, project_lifetime),
+                        step=1,
                     )
 
-                    irr_color = "normal"
-                    if results.irr > discount_rate:
-                        irr_delta = f"+{results.irr - discount_rate:.1f}%"
-                        irr_color = "off"
-                    k3.metric(
-                        "内部收益率 IRR",
-                        f"{results.irr:.2f} %",
-                        delta=irr_delta if 'irr_delta' in locals() else None,
-                        delta_color=irr_color,
-                    )
-
-                    pb_color = "normal"
-                    if results.payback_period <= project_lifetime:
-                        pb_color = "off"
-                    k4.metric(
-                        "投资回收期",
-                        f"{results.payback_period:.1f} 年" if results.payback_period <= project_lifetime else ">项目寿命期内未回收",
-                        delta_color=pb_color,
-                    )
-
-                    kk1, kk2 = st.columns(2)
-                    kk1.metric(
-                        "全生命周期总收入",
-                        f"{results.total_revenue:.2f} 万元",
-                    )
-                    kk2.metric(
-                        "全生命周期总利润",
-                        f"{results.total_profit:.2f} 万元",
-                        delta_color="off" if results.total_profit > 0 else "normal",
-                    )
-
-                    st.divider()
-
-                    g1, g2 = st.columns(2)
-                    with g1:
-                        cash_flow_fig = plot_cash_flow_lines(
-                            results.years,
-                            results.annual_revenue,
-                            results.annual_total_cost,
-                            results.annual_cash_flow,
-                            title=f"{project_lifetime}年逐年现金流",
-                        )
-                        st.plotly_chart(cash_flow_fig, use_container_width=True)
-
-                    with g2:
-                        cum_flow_fig = plot_cumulative_cash_flow(
-                            results.years,
-                            results.cumulative_cash_flow,
-                            results.payback_period,
-                            title="累计净现金流曲线",
-                        )
-                        st.plotly_chart(cum_flow_fig, use_container_width=True)
-
-                    st.divider()
-                    st.subheader("📊 逐年现金流明细")
-                    detail_df = pd.DataFrame({
-                        "年份": results.years.astype(int),
-                        "发电量 (GWh)": (results.annual_generation / 1e6).round(3),
-                        "电价 (元/kWh)": [
-                            calculate_electricity_price(
-                                y, electricity_price_1, electricity_price_2, price_switch_year
-                            ) for y in results.years
-                        ],
-                        "收入 (万元)": results.annual_revenue.round(2),
-                        "固定运维 (万元)": results.annual_fixed_om_cost.round(2),
-                        "可变运维 (万元)": results.annual_variable_om_cost.round(2),
-                        "贷款偿还 (万元)": results.annual_loan_payment.round(2),
-                        "总支出 (万元)": results.annual_total_cost.round(2),
-                        "净现金流 (万元)": results.annual_cash_flow.round(2),
-                        "累计净现金流 (万元)": results.cumulative_cash_flow.round(2),
-                    })
-                    st.dataframe(detail_df, use_container_width=True, hide_index=True)
-
-                    st.divider()
-                    st.subheader("📈 单变量敏感性分析")
-                    sens_param = st.radio(
-                        "选择分析参数",
-                        ["电价", "投资成本", "折现率"],
-                        horizontal=True,
-                        key="econ_sens_radio",
-                    )
-                    sens_param_map = {
-                        "电价": "electricity_price",
-                        "投资成本": "total_investment",
-                        "折现率": "discount_rate",
-                    }
-                    sens_param_name = sens_param_map[sens_param]
-
-                    if "last_sens_param" not in st.session_state:
-                        st.session_state.last_sens_param = None
-
-                    if st.session_state.last_sens_param != sens_param_name:
-                        st.session_state.sensitivity_econ_results = None
-                        st.session_state.last_sens_param = sens_param_name
-
-                    run_sens = st.button(
-                        "🔍 运行敏感性分析",
-                        type="secondary",
-                    )
-                    if run_sens or st.session_state.sensitivity_econ_results is not None:
-                        if run_sens:
-                            with st.spinner("敏感性分析中..."):
-                                param_vals, npv_vals, crit_val = run_sensitivity_analysis(
-                                    params, sens_param_name,
-                                    variation_pct=30.0, num_points=10,
-                                )
-                                st.session_state.sensitivity_econ_results = (
-                                    param_vals, npv_vals, crit_val
-                                )
-                        sens_results = st.session_state.sensitivity_econ_results
-                        if sens_results is not None:
-                            param_vals, npv_vals, crit_val = sens_results
-                            base_val_map = {
-                                "electricity_price": electricity_price_1,
-                                "total_investment": total_investment,
-                                "discount_rate": discount_rate,
-                            }
-                            base_value = base_val_map[sens_param_name]
-                            sens_fig = plot_sensitivity_curve(
-                                param_vals, npv_vals,
-                                sens_param_name,
-                                crit_val, base_value,
-                                title=f"NPV vs {sens_param} 敏感性分析",
-                            )
-                            st.plotly_chart(sens_fig, use_container_width=True)
-
-                            if crit_val is not None:
-                                unit_map = {
-                                    "electricity_price": "元/kWh",
-                                    "total_investment": "万元",
-                                    "discount_rate": "%",
-                                }
-                                st.info(
-                                    f"📌 **临界值分析**: 当{sens_param} = **{crit_val:.4f} {unit_map[sens_param_name]} 时，NPV = 0\n\n"
-                                    f"当前值: **{base_value:.4f} {unit_map[sens_param_name]}"
-                                )
-
-                    st.divider()
-                    st.subheader("💾 导出分析结果")
-                    export_data = {
-                        "project_name": st.session_state.project_name,
-                        "export_time": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                        "input_parameters": {
-                            "total_investment_wan": total_investment,
-                            "annual_fixed_om_wan": annual_fixed_om,
-                            "variable_om_unit_yuan_kwh": variable_om_unit,
-                            "electricity_price_1": electricity_price_1,
-                            "electricity_price_2": electricity_price_2,
-                            "price_switch_year": price_switch_year,
-                            "project_lifetime": project_lifetime,
-                            "discount_rate": discount_rate,
-                            "salvage_rate": salvage_rate,
-                            "loan_ratio": loan_ratio,
-                            "loan_interest_rate": loan_interest_rate,
-                            "loan_tenor": loan_tenor,
-                            "aep_kwh": aep_kwh,
-                            "aep_gwh": aep_gwh,
-                            "power_decay_rate": power_decay,
-                        },
-                        "key_metrics": {
-                            "lcoe_yuan_kwh": float(results.lcoe),
-                            "npv_wan": float(results.npv),
-                            "irr_percent": float(results.irr),
-                            "payback_period_years": float(results.payback_period),
-                            "total_revenue_wan": float(results.total_revenue),
-                            "total_profit_wan": float(results.total_profit),
-                            "salvage_value_wan": float(results.salvage_value),
-                            "annual_loan_payment_wan": float(results.loan_payment_amount),
-                        },
-                        "annual_data": {
-                            "year": results.years.tolist(),
-                            "generation_kwh": results.annual_generation.tolist(),
-                            "revenue_wan": results.annual_revenue.tolist(),
-                            "fixed_om_cost_wan": results.annual_fixed_om_cost.tolist(),
-                            "variable_om_cost_wan": results.annual_variable_om_cost.tolist(),
-                            "loan_payment_wan": results.annual_loan_payment.tolist(),
-                            "total_cost_wan": results.annual_total_cost.tolist(),
-                            "net_cash_flow_wan": results.annual_cash_flow.tolist(),
-                            "cumulative_cash_flow_wan": results.cumulative_cash_flow.tolist(),
-                        },
-                    }
-                    json_str = json.dumps(export_data, ensure_ascii=False, indent=2)
-                    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-                    safe_project_name = st.session_state.project_name.replace(" ", "_")
-                    filename = f"经济分析_{safe_project_name}_{timestamp}.json"
-                    st.download_button(
-                        label="📥 导出JSON报告",
-                        data=json_str,
-                        file_name=filename,
-                        mime="application/json",
+                st.divider()
+                c_run, c_clear = st.columns(2)
+                with c_run:
+                    run_econ = st.button(
+                        "🚀 计算经济指标",
+                        type="primary",
                         use_container_width=True,
                     )
-                    st.caption(f"文件名: `{filename}`")
+                with c_clear:
+                    if st.button("🔄 重置参数", use_container_width=True):
+                        st.session_state.economic_results = None
+                        st.session_state.sensitivity_econ_results = None
+                        st.session_state.risk_matrix_results = None
+                        st.rerun()
+
+                st.info(
+                    f"📊 自动获取AEP: **{aep_gwh:.3f} GWh/年**\n\n"
+                    f"贷款金额: **{total_investment * loan_ratio / 100:.0f} 万元** "
+                    f"(自有资金: **{total_investment * (1 - loan_ratio / 100):.0f} 万元**)"
+                )
+
+            with right_col:
+                if run_econ or st.session_state.economic_results is not None:
+                    if run_econ:
+                        params = EconomicParams(
+                            total_investment=total_investment,
+                            annual_fixed_om=annual_fixed_om,
+                            variable_om_unit=variable_om_unit,
+                            electricity_price_1=electricity_price_1,
+                            electricity_price_2=electricity_price_2,
+                            price_switch_year=price_switch_year,
+                            project_lifetime=project_lifetime,
+                            discount_rate=discount_rate,
+                            salvage_rate=salvage_rate,
+                            loan_ratio=loan_ratio,
+                            loan_interest_rate=loan_interest_rate,
+                            loan_tenor=loan_tenor,
+                            aep_kwh=aep_kwh,
+                            power_decay_rate=power_decay,
+                        )
+                        st.session_state.economic_params = params
+                        with st.spinner("计算中..."):
+                            results = run_economic_analysis(params)
+                        st.session_state.economic_results = results
+
+                    results = st.session_state.economic_results
+                    params = st.session_state.economic_params
+
+                    if results is not None:
+                        st.subheader("🎯 核心经济指标")
+                        k1, k2, k3, k4 = st.columns(4)
+
+                        lcoe_color = "normal"
+                        lcoe_delta = None
+                        if results.lcoe > 0 and electricity_price_1 > 0:
+                            diff = abs(electricity_price_1 - results.lcoe)
+                            if results.lcoe < electricity_price_1:
+                                pct = diff / max(results.lcoe, 1e-6) * 100
+                                lcoe_delta = f"-{pct:.1f}%"
+                                lcoe_color = "off"
+                            elif results.lcoe > electricity_price_1:
+                                pct = diff / max(electricity_price_1, 1e-6) * 100
+                                lcoe_delta = f"+{pct:.1f}%"
+                        k1.metric(
+                            "度电成本 LCOE",
+                            f"{results.lcoe:.4f} 元/kWh",
+                            delta=lcoe_delta,
+                            delta_color=lcoe_color,
+                        )
+
+                        npv_color = "normal"
+                        if results.npv > 0:
+                            npv_color = "off"
+                        k2.metric(
+                            "净现值 NPV",
+                            f"{results.npv:.2f} 万元",
+                            delta_color=npv_color,
+                        )
+
+                        irr_color = "normal"
+                        if results.irr > discount_rate:
+                            irr_delta = f"+{results.irr - discount_rate:.1f}%"
+                            irr_color = "off"
+                        k3.metric(
+                            "内部收益率 IRR",
+                            f"{results.irr:.2f} %",
+                            delta=irr_delta if 'irr_delta' in locals() else None,
+                            delta_color=irr_color,
+                        )
+
+                        pb_color = "normal"
+                        if results.payback_period <= project_lifetime:
+                            pb_color = "off"
+                        k4.metric(
+                            "投资回收期",
+                            f"{results.payback_period:.1f} 年" if results.payback_period <= project_lifetime else ">项目寿命期内未回收",
+                            delta_color=pb_color,
+                        )
+
+                        kk1, kk2 = st.columns(2)
+                        kk1.metric(
+                            "全生命周期总收入",
+                            f"{results.total_revenue:.2f} 万元",
+                        )
+                        kk2.metric(
+                            "全生命周期总利润",
+                            f"{results.total_profit:.2f} 万元",
+                            delta_color="off" if results.total_profit > 0 else "normal",
+                        )
+
+                        st.divider()
+
+                        g1, g2 = st.columns(2)
+                        with g1:
+                            cash_flow_fig = plot_cash_flow_lines(
+                                results.years,
+                                results.annual_revenue,
+                                results.annual_total_cost,
+                                results.annual_cash_flow,
+                                title=f"{project_lifetime}年逐年现金流",
+                            )
+                            st.plotly_chart(cash_flow_fig, use_container_width=True)
+
+                        with g2:
+                            cum_flow_fig = plot_cumulative_cash_flow(
+                                results.years,
+                                results.cumulative_cash_flow,
+                                results.payback_period,
+                                title="累计净现金流曲线",
+                            )
+                            st.plotly_chart(cum_flow_fig, use_container_width=True)
+
+                        st.divider()
+                        st.subheader("📊 逐年现金流明细")
+                        r = discount_rate / 100.0
+                        years_arr = results.years
+                        discount_factors = 1.0 / (1 + r) ** years_arr
+                        discounted_cash_flow = results.annual_cash_flow * discount_factors
+                        cumulative_discounted = np.cumsum(discounted_cash_flow)
+
+                        detail_df = pd.DataFrame({
+                            "年份": results.years.astype(int),
+                            "发电量 (GWh)": (results.annual_generation / 1e6).round(3),
+                            "电价 (元/kWh)": [
+                                calculate_electricity_price(
+                                    y, electricity_price_1, electricity_price_2, price_switch_year
+                                ) for y in results.years
+                            ],
+                            "收入 (万元)": results.annual_revenue.round(2),
+                            "固定运维 (万元)": results.annual_fixed_om_cost.round(2),
+                            "可变运维 (万元)": results.annual_variable_om_cost.round(2),
+                            "贷款偿还 (万元)": results.annual_loan_payment.round(2),
+                            "总支出 (万元)": results.annual_total_cost.round(2),
+                            "净现金流 (万元)": results.annual_cash_flow.round(2),
+                            "累计净现金流 (万元)": results.cumulative_cash_flow.round(2),
+                            "折现因子": discount_factors.round(6),
+                            "折现净现金流 (万元)": discounted_cash_flow.round(2),
+                            "累计折现净现金流 (万元)": cumulative_discounted.round(2),
+                        })
+
+                        total_row = pd.DataFrame({
+                            "年份": ["合计"],
+                            "发电量 (GWh)": [round(results.annual_generation.sum() / 1e6, 3)],
+                            "电价 (元/kWh)": ["-"],
+                            "收入 (万元)": [round(results.annual_revenue.sum(), 2)],
+                            "固定运维 (万元)": [round(results.annual_fixed_om_cost.sum(), 2)],
+                            "可变运维 (万元)": [round(results.annual_variable_om_cost.sum(), 2)],
+                            "贷款偿还 (万元)": [round(results.annual_loan_payment.sum(), 2)],
+                            "总支出 (万元)": [round(results.annual_total_cost.sum(), 2)],
+                            "净现金流 (万元)": [round(results.annual_cash_flow.sum(), 2)],
+                            "累计净现金流 (万元)": ["-"],
+                            "折现因子": ["-"],
+                            "折现净现金流 (万元)": [round(discounted_cash_flow.sum(), 2)],
+                            "累计折现净现金流 (万元)": ["-"],
+                        })
+                        detail_df = pd.concat([detail_df, total_row], ignore_index=True)
+                        st.dataframe(detail_df, use_container_width=True, hide_index=True)
+
+                        st.caption(
+                            f"💡 **说明**: 累计折现净现金流期末值 = NPV + 初始投资折现值 ≈ "
+                            f"{results.npv + total_investment * discount_factors[0]:.2f} 万元"
+                        )
+
+                        st.divider()
+                        st.subheader("📈 单变量敏感性分析")
+                        sens_param = st.radio(
+                            "选择分析参数",
+                            ["电价", "投资成本", "折现率"],
+                            horizontal=True,
+                            key="econ_sens_radio",
+                        )
+                        sens_param_map = {
+                            "电价": "electricity_price",
+                            "投资成本": "total_investment",
+                            "折现率": "discount_rate",
+                        }
+                        sens_param_name = sens_param_map[sens_param]
+
+                        if "last_sens_param" not in st.session_state:
+                            st.session_state.last_sens_param = None
+
+                        if st.session_state.last_sens_param != sens_param_name:
+                            st.session_state.sensitivity_econ_results = None
+                            st.session_state.last_sens_param = sens_param_name
+
+                        run_sens = st.button(
+                            "🔍 运行敏感性分析",
+                            type="secondary",
+                        )
+                        if run_sens or st.session_state.sensitivity_econ_results is not None:
+                            if run_sens:
+                                with st.spinner("敏感性分析中..."):
+                                    param_vals, npv_vals, crit_val = run_sensitivity_analysis(
+                                        params, sens_param_name,
+                                        variation_pct=30.0, num_points=10,
+                                    )
+                                    st.session_state.sensitivity_econ_results = (
+                                        param_vals, npv_vals, crit_val
+                                    )
+                            sens_results = st.session_state.sensitivity_econ_results
+                            if sens_results is not None:
+                                param_vals, npv_vals, crit_val = sens_results
+                                base_val_map = {
+                                    "electricity_price": electricity_price_1,
+                                    "total_investment": total_investment,
+                                    "discount_rate": discount_rate,
+                                }
+                                base_value = base_val_map[sens_param_name]
+                                sens_fig = plot_sensitivity_curve(
+                                    param_vals, npv_vals,
+                                    sens_param_name,
+                                    crit_val, base_value,
+                                    title=f"NPV vs {sens_param} 敏感性分析",
+                                )
+                                st.plotly_chart(sens_fig, use_container_width=True)
+
+                                if crit_val is not None:
+                                    unit_map = {
+                                        "electricity_price": "元/kWh",
+                                        "total_investment": "万元",
+                                        "discount_rate": "%",
+                                    }
+                                    st.info(
+                                        f"📌 **临界值分析**: 当{sens_param} = **{crit_val:.4f} {unit_map[sens_param_name]} 时，NPV = 0\n\n"
+                                        f"当前值: **{base_value:.4f} {unit_map[sens_param_name]}"
+                                    )
+
+                        st.divider()
+                        st.subheader("💾 导出分析结果")
+
+                        export_data = {
+                            "project_name": st.session_state.project_name,
+                            "export_time": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                            "input_parameters": {
+                                "total_investment_wan": total_investment,
+                                "annual_fixed_om_wan": annual_fixed_om,
+                                "variable_om_unit_yuan_kwh": variable_om_unit,
+                                "electricity_price_1": electricity_price_1,
+                                "electricity_price_2": electricity_price_2,
+                                "price_switch_year": price_switch_year,
+                                "project_lifetime": project_lifetime,
+                                "discount_rate": discount_rate,
+                                "salvage_rate": salvage_rate,
+                                "loan_ratio": loan_ratio,
+                                "loan_interest_rate": loan_interest_rate,
+                                "loan_tenor": loan_tenor,
+                                "aep_kwh": aep_kwh,
+                                "aep_gwh": aep_gwh,
+                                "power_decay_rate": power_decay,
+                            },
+                            "key_metrics": {
+                                "lcoe_yuan_kwh": float(results.lcoe),
+                                "npv_wan": float(results.npv),
+                                "irr_percent": float(results.irr),
+                                "payback_period_years": float(results.payback_period),
+                                "total_revenue_wan": float(results.total_revenue),
+                                "total_profit_wan": float(results.total_profit),
+                                "salvage_value_wan": float(results.salvage_value),
+                                "annual_loan_payment_wan": float(results.loan_payment_amount),
+                            },
+                            "annual_data": {
+                                "year": results.years.tolist(),
+                                "generation_kwh": results.annual_generation.tolist(),
+                                "revenue_wan": results.annual_revenue.tolist(),
+                                "fixed_om_cost_wan": results.annual_fixed_om_cost.tolist(),
+                                "variable_om_cost_wan": results.annual_variable_om_cost.tolist(),
+                                "loan_payment_wan": results.annual_loan_payment.tolist(),
+                                "total_cost_wan": results.annual_total_cost.tolist(),
+                                "net_cash_flow_wan": results.annual_cash_flow.tolist(),
+                                "cumulative_cash_flow_wan": results.cumulative_cash_flow.tolist(),
+                                "discount_factor": discount_factors.tolist(),
+                                "discounted_cash_flow_wan": discounted_cash_flow.tolist(),
+                                "cumulative_discounted_cash_flow_wan": cumulative_discounted.tolist(),
+                            },
+                        }
+                        json_str = json.dumps(export_data, ensure_ascii=False, indent=2)
+                        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                        safe_project_name = st.session_state.project_name.replace(" ", "_")
+                        json_filename = f"经济分析_{safe_project_name}_{timestamp}.json"
+
+                        sens_conclusion = ""
+                        if st.session_state.sensitivity_econ_results is not None:
+                            _, _, crit_val = st.session_state.sensitivity_econ_results
+                            if crit_val is not None:
+                                unit = unit_map.get(sens_param_name, "")
+                                sens_conclusion = f"敏感性分析显示，当{sens_param}达到 {crit_val:.4f} {unit} 时，项目NPV为零（盈亏平衡点）。当前{sens_param}为 {base_value:.4f} {unit}。"
+
+                        risk_conclusion = ""
+                        if st.session_state.risk_matrix_results is not None:
+                            _, _, npv_mat = st.session_state.risk_matrix_results
+                            pos_count = np.sum(npv_mat > 0)
+                            total_count = npv_mat.size
+                            risk_conclusion = f"风险评估矩阵分析显示，在电价和投资成本各±20%的波动范围内，{pos_count}/{total_count} 个场景下NPV为正（项目盈利）。"
+
+                        md_content = f"""# {st.session_state.project_name} - 经济性分析报告
+
+**导出时间**: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+
+## 一、项目概述
+
+本项目为风电场投资项目，总装机容量对应年发电量约 {aep_gwh:.2f} GWh。项目总投资 {total_investment:.0f} 万元，其中贷款比例 {loan_ratio:.1f}%，贷款年限 {loan_tenor} 年，贷款年利率 {loan_interest_rate:.2f}%。
+
+项目寿命期 {project_lifetime} 年，采用阶梯电价机制，前 {price_switch_year} 年电价 {electricity_price_1:.4f} 元/kWh，后续年份电价 {electricity_price_2:.4f} 元/kWh。年功率衰减率 {power_decay:.1f}%，年固定运维成本 {annual_fixed_om:.1f} 万元，可变运维成本 {variable_om_unit:.4f} 元/kWh。
+
+折现率取 {discount_rate:.2f}%，残值率 {salvage_rate:.1f}%。
+
+## 二、核心经济指标
+
+| 指标 | 数值 | 单位 |
+|------|------|------|
+| 度电成本 LCOE | {results.lcoe:.4f} | 元/kWh |
+| 净现值 NPV | {results.npv:.2f} | 万元 |
+| 内部收益率 IRR | {results.irr:.2f} | % |
+| 投资回收期 | {results.payback_period:.1f} | 年 |
+| 全生命周期总收入 | {results.total_revenue:.2f} | 万元 |
+| 全生命周期总利润 | {results.total_profit:.2f} | 万元 |
+| 残值 | {results.salvage_value:.2f} | 万元 |
+| 年还款额 | {results.loan_payment_amount:.2f} | 万元 |
+
+## 三、逐年现金流简表
+
+| 年份 | 净现金流 (万元) |
+|------|---------------|
+"""
+                        for i, y in enumerate(results.years.astype(int)):
+                            md_content += f"| 第{y}年 | {results.annual_cash_flow[i]:.2f} |\n"
+
+                        md_content += f"""
+## 四、敏感性分析结论
+
+{sens_conclusion if sens_conclusion else '未进行敏感性分析。'}
+
+## 五、风险评估结论
+
+{risk_conclusion if risk_conclusion else '未进行风险评估矩阵分析。'}
+
+---
+*本报告由风电场尾流分析与AEP预测系统自动生成*
+"""
+
+                        md_filename = f"经济分析_{safe_project_name}_{timestamp}.md"
+
+                        col_dl1, col_dl2 = st.columns(2)
+                        with col_dl1:
+                            st.download_button(
+                                label="📥 导出JSON报告",
+                                data=json_str,
+                                file_name=json_filename,
+                                mime="application/json",
+                                use_container_width=True,
+                            )
+                        with col_dl2:
+                            st.download_button(
+                                label="📄 导出Markdown报告",
+                                data=md_content,
+                                file_name=md_filename,
+                                mime="text/markdown",
+                                use_container_width=True,
+                            )
+                        st.caption(f"JSON文件名: `{json_filename}`  |  Markdown文件名: `{md_filename}`")
+
+        with sub_tab_compare:
+            st.subheader("🔄 多方案对比分析")
+            st.markdown(
+                "保存不同的参数组合为独立方案，横向对比LCOE、NPV、IRR、投资回收期等关键指标，辅助投资决策。"
+            )
+
+            if st.session_state.economic_results is None:
+                st.warning("⚠️ 请先在『基础分析』Tab中运行一次经济性分析，然后再保存方案。")
+            else:
+                col_save1, col_save2, col_save3 = st.columns([2, 1, 1])
+                with col_save1:
+                    scenario_name = st.text_input(
+                        "方案名称",
+                        value=f"方案{len(st.session_state.saved_scenarios) + 1}",
+                        help="给当前参数组合起一个名字，便于识别"
+                    )
+                with col_save2:
+                    st.write("")
+                    st.write("")
+                    save_disabled = len(st.session_state.saved_scenarios) >= 5
+                    if st.button("💾 保存当前方案", type="primary", disabled=save_disabled, use_container_width=True):
+                        current_params = st.session_state.economic_params
+                        current_results = st.session_state.economic_results
+                        scenario = {
+                            "name": scenario_name,
+                            "params": copy.deepcopy(current_params),
+                            "results": copy.deepcopy(current_results),
+                        }
+                        st.session_state.saved_scenarios.append(scenario)
+                        st.success(f"已保存方案: {scenario_name}")
+                        st.rerun()
+                with col_save3:
+                    st.write("")
+                    st.write("")
+                    if st.button("🗑️ 清空所有方案", type="secondary", use_container_width=True):
+                        st.session_state.saved_scenarios = []
+                        st.rerun()
+
+                st.caption(f"已保存方案数: {len(st.session_state.saved_scenarios)} / 5")
+
+                if len(st.session_state.saved_scenarios) >= 2:
+                    st.divider()
+                    st.subheader("📊 方案对比图")
+
+                    scenario_names = [s["name"] for s in st.session_state.saved_scenarios]
+                    lcoe_vals = [s["results"].lcoe for s in st.session_state.saved_scenarios]
+                    npv_vals = [s["results"].npv for s in st.session_state.saved_scenarios]
+                    irr_vals = [s["results"].irr for s in st.session_state.saved_scenarios]
+                    pb_vals = [s["results"].payback_period for s in st.session_state.saved_scenarios]
+
+                    compare_fig = plot_scenario_comparison(
+                        scenario_names,
+                        lcoe_vals,
+                        npv_vals,
+                        irr_vals,
+                        pb_vals,
+                        title="多方案经济指标对比",
+                    )
+                    st.plotly_chart(compare_fig, use_container_width=True)
+
+                    st.divider()
+                    st.subheader("📋 方案参数差异对比")
+                    st.caption("仅显示各方案间存在差异的参数，相同参数已折叠隐藏。")
+
+                    param_label_map = {
+                        "total_investment": "总投资 (万元)",
+                        "annual_fixed_om": "年固定运维 (万元)",
+                        "variable_om_unit": "可变运维单价 (元/kWh)",
+                        "electricity_price_1": "前N年电价 (元/kWh)",
+                        "electricity_price_2": "后续电价 (元/kWh)",
+                        "price_switch_year": "电价切换年份",
+                        "project_lifetime": "项目寿命 (年)",
+                        "discount_rate": "折现率 (%)",
+                        "salvage_rate": "残值率 (%)",
+                        "loan_ratio": "贷款比例 (%)",
+                        "loan_interest_rate": "贷款年利率 (%)",
+                        "loan_tenor": "贷款年限 (年)",
+                        "aep_kwh": "年发电量 (kWh)",
+                        "power_decay_rate": "年功率衰减 (%)",
+                    }
+
+                    all_params = list(param_label_map.keys())
+                    diff_params = []
+                    for param in all_params:
+                        values = []
+                        for s in st.session_state.saved_scenarios:
+                            val = getattr(s["params"], param)
+                            values.append(val)
+                        if len(set(values)) > 1:
+                            diff_params.append(param)
+
+                    if diff_params:
+                        diff_data = {"参数": [param_label_map[p] for p in diff_params]}
+                        for s in st.session_state.saved_scenarios:
+                            vals = []
+                            for p in diff_params:
+                                val = getattr(s["params"], p)
+                                if isinstance(val, float):
+                                    vals.append(f"{val:.4f}")
+                                else:
+                                    vals.append(str(val))
+                            diff_data[s["name"]] = vals
+                        diff_df = pd.DataFrame(diff_data)
+                        st.dataframe(diff_df, use_container_width=True, hide_index=True)
+                    else:
+                        st.info("所有方案参数完全相同，无差异项。")
+
+                    st.divider()
+                    st.subheader("📈 核心指标对比表")
+                    metrics_data = {
+                        "指标": ["LCOE (元/kWh)", "NPV (万元)", "IRR (%)", "投资回收期 (年)", "总收入 (万元)", "总利润 (万元)"],
+                    }
+                    for s in st.session_state.saved_scenarios:
+                        metrics_data[s["name"]] = [
+                            f"{s['results'].lcoe:.4f}",
+                            f"{s['results'].npv:.2f}",
+                            f"{s['results'].irr:.2f}",
+                            f"{s['results'].payback_period:.1f}",
+                            f"{s['results'].total_revenue:.2f}",
+                            f"{s['results'].total_profit:.2f}",
+                        ]
+                    metrics_df = pd.DataFrame(metrics_data)
+                    st.dataframe(metrics_df, use_container_width=True, hide_index=True)
+                elif len(st.session_state.saved_scenarios) == 1:
+                    st.info("💡 已保存1个方案。请再保存至少1个方案以进行对比分析。")
+                else:
+                    st.info("💡 暂无保存的方案。在上方输入方案名称并点击『保存当前方案』按钮开始。")
+
+        with sub_tab_risk:
+            st.subheader("⚠️ 风险评估矩阵")
+            st.markdown(
+                "同时扫描电价和投资成本两个关键变量的变化，计算每种组合下的NPV，"
+                "用热力图直观展示项目盈利/亏损区间，评估项目抗风险能力。"
+            )
+
+            if st.session_state.economic_results is None:
+                st.warning("⚠️ 请先在『基础分析』Tab中运行一次经济性分析，然后再进行风险评估。")
+            else:
+                risk_col1, risk_col2, risk_col3 = st.columns([1, 1, 1])
+                with risk_col1:
+                    price_var = st.slider(
+                        "电价变化范围 (±%)",
+                        min_value=5.0,
+                        max_value=50.0,
+                        value=20.0,
+                        step=5.0,
+                    )
+                with risk_col2:
+                    inv_var = st.slider(
+                        "投资成本变化范围 (±%)",
+                        min_value=5.0,
+                        max_value=50.0,
+                        value=20.0,
+                        step=5.0,
+                    )
+                with risk_col3:
+                    num_points = st.slider(
+                        "每维度扫描点数",
+                        min_value=3,
+                        max_value=9,
+                        value=5,
+                        step=2,
+                    )
+
+                run_risk = st.button("🚀 运行风险评估", type="primary", use_container_width=False)
+
+                if run_risk or st.session_state.risk_matrix_results is not None:
+                    if run_risk:
+                        with st.spinner(f"风险评估中... 共 {num_points * num_points} 个组合"):
+                            price_pcts, inv_pcts, npv_mat = run_risk_matrix_analysis(
+                                st.session_state.economic_params,
+                                price_variation_pct=price_var,
+                                investment_variation_pct=inv_var,
+                                num_points=num_points,
+                            )
+                            st.session_state.risk_matrix_results = (price_pcts, inv_pcts, npv_mat)
+
+                    risk_results = st.session_state.risk_matrix_results
+                    if risk_results is not None:
+                        price_pcts, inv_pcts, npv_mat = risk_results
+
+                        st.divider()
+                        st.subheader("🗺️ NPV热力图")
+
+                        risk_fig = plot_risk_heatmap(
+                            price_pcts,
+                            inv_pcts,
+                            npv_mat,
+                            title="风险评估矩阵 — 电价×投资成本对NPV的影响",
+                        )
+                        st.plotly_chart(risk_fig, use_container_width=True)
+
+                        st.divider()
+                        st.subheader("📊 风险分析结论")
+
+                        pos_count = int(np.sum(npv_mat > 0))
+                        total_count = npv_mat.size
+                        pos_ratio = pos_count / total_count * 100
+
+                        max_npv = float(np.max(npv_mat))
+                        min_npv = float(np.min(npv_mat))
+
+                        base_idx_price = num_points // 2
+                        base_idx_inv = num_points // 2
+                        base_npv = float(npv_mat[base_idx_inv, base_idx_price])
+
+                        rc1, rc2, rc3 = st.columns(3)
+                        rc1.metric(
+                            "盈利场景占比",
+                            f"{pos_ratio:.1f}%",
+                            help=f"在 {total_count} 个组合中，有 {pos_count} 个场景NPV为正",
+                        )
+                        rc2.metric(
+                            "最佳场景NPV",
+                            f"{max_npv:.1f} 万元",
+                            delta=f"+{max_npv - base_npv:.1f}" if max_npv > base_npv else None,
+                        )
+                        rc3.metric(
+                            "最差场景NPV",
+                            f"{min_npv:.1f} 万元",
+                            delta=f"{min_npv - base_npv:.1f}" if min_npv < base_npv else None,
+                            delta_color="inverse",
+                        )
+
+                        if min_npv >= 0:
+                            st.success(
+                                f"✅ **结论**: 在电价±{price_var:.0f}%、投资成本±{inv_var:.0f}%的波动范围内，"
+                                f"所有 {total_count} 个场景NPV均为正，项目抗风险能力较强。"
+                            )
+                        elif max_npv <= 0:
+                            st.error(
+                                f"❌ **结论**: 在电价±{price_var:.0f}%、投资成本±{inv_var:.0f}%的波动范围内，"
+                                f"所有 {total_count} 个场景NPV均为负，项目风险极高。"
+                            )
+                        else:
+                            st.info(
+                                f"⚠️ **结论**: 在电价±{price_var:.0f}%、投资成本±{inv_var:.0f}%的波动范围内，"
+                                f"盈利场景占比 {pos_ratio:.1f}% ({pos_count}/{total_count})。\n\n"
+                                f"当电价上涨和/或投资成本下降时，项目盈利增加；"
+                                f"当电价下降和/或投资成本上升时，项目盈利减少甚至亏损。"
+                            )
+
+                        with st.expander("📋 查看完整NPV矩阵数据 (万元)"):
+                            npv_df = pd.DataFrame(
+                                np.round(npv_mat, 2),
+                                index=[f"投资 {v:+.0f}%" for v in inv_pcts],
+                                columns=[f"电价 {v:+.0f}%" for v in price_pcts],
+                            )
+                            st.dataframe(npv_df, use_container_width=True)
 
 
 # ============================================================
